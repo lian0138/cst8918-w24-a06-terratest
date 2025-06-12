@@ -1,0 +1,97 @@
+package test
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/gruntwork-io/terratest/modules/azure"
+	"github.com/gruntwork-io/terratest/modules/terraform"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// You normally want to run this under a separate "Testing" subscription
+// For lab purposes you will use your assigned subscription under the Cloud Dev/Ops program tenant
+var subscriptionID string = "1f9a4d89-32f2-4e2f-abcf-e458452b32fa"
+
+func TestAzureLinuxVMCreation(t *testing.T) {
+	terraformOptions := &terraform.Options{
+		// The path to where our Terraform code is located
+		TerraformDir: "../",
+		// Override the default terraform variables
+		Vars: map[string]interface{}{
+			"labelPrefix": "lian0138",
+		},
+	}
+
+	defer terraform.Destroy(t, terraformOptions)
+
+	// Run `terraform init` and `terraform apply`. Fail the test if there are any errors.
+	terraform.InitAndApply(t, terraformOptions)
+
+	// Run `terraform output` to get the value of output variable
+	vmName := terraform.Output(t, terraformOptions, "vm_name")
+	resourceGroupName := terraform.Output(t, terraformOptions, "resource_group_name")
+
+	// Confirm VM exists
+	assert.True(t, azure.VirtualMachineExists(t, vmName, resourceGroupName, subscriptionID))
+}
+
+func TestNICExistsAndConnected(t *testing.T) {
+	terraformOptions := &terraform.Options{
+		TerraformDir: "../",
+		Vars: map[string]interface{}{
+			"labelPrefix": "lian0138",
+		},
+	}
+
+	defer terraform.Destroy(t, terraformOptions)
+	terraform.InitAndApply(t, terraformOptions)
+
+	vmName := terraform.Output(t, terraformOptions, "vm_name")
+	resourceGroupName := terraform.Output(t, terraformOptions, "resource_group_name")
+	nicName := terraform.Output(t, terraformOptions, "nic_name")
+
+	// Confirm NIC exists
+	assert.True(t, azure.NetworkInterfaceExists(t, nicName, resourceGroupName, subscriptionID), "NIC does not exist")
+
+	// Confirm NIC is attached to VM
+	vm, err := azure.GetVirtualMachineE(vmName, resourceGroupName, subscriptionID)
+	require.NoError(t, err, "Failed to get VM details")
+	if vm.NetworkProfile.NetworkInterfaces == nil {
+		t.Fatal("NetworkInterfaces is nil")
+	}
+	for _, nicRef := range *vm.NetworkProfile.NetworkInterfaces {
+		if nicRef.ID != nil {
+			nicIDs := append([]string{}, *nicRef.ID)
+			expectedNICID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/networkInterfaces/%s", subscriptionID, resourceGroupName, nicName)
+			assert.Contains(t, nicIDs, expectedNICID, "NIC is not attached to VM")
+		}
+	}
+}
+
+func TestUbuntuVersion(t *testing.T) {
+	terraformOptions := &terraform.Options{
+		TerraformDir: "../",
+		Vars: map[string]interface{}{
+			"labelPrefix": "lian0138",
+		},
+	}
+
+	defer terraform.Destroy(t, terraformOptions)
+	terraform.InitAndApply(t, terraformOptions)
+
+	vmName := terraform.Output(t, terraformOptions, "vm_name")
+	resourceGroupName := terraform.Output(t, terraformOptions, "resource_group_name")
+
+	// Retrieve VM details
+	vm, err := azure.GetVirtualMachineE(vmName, resourceGroupName, subscriptionID)
+	require.NoError(t, err, "Failed to get VM details")
+
+	// Confirm Ubuntu version
+	imageRef := vm.StorageProfile.ImageReference
+	assert.Equal(t, "Canonical", *imageRef.Publisher, "VM publisher is not Canonical")
+	assert.Equal(t, "0001-com-ubuntu-server-jammy", *imageRef.Offer, "VM offer is not 0001-com-ubuntu-server-jammy")
+	expectedUbuntuSku := "22_04-lts-gen2" // Matches main.tf
+	assert.Equal(t, expectedUbuntuSku, *imageRef.Sku, "VM is not running Ubuntu 22.04 LTS Gen2")
+}
