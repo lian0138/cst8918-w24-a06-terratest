@@ -15,7 +15,7 @@ import (
 
 // You normally want to run this under a separate "Testing" subscription
 // For lab purposes you will use your assigned subscription under the Cloud Dev/Ops program tenant
-var subscriptionID string = "1f9a4d89-32f2-4e2f-abcf-e458452b32fa"
+var subscriptionID string = "Based on security concenrns, I removed my ID"
 
 // Shared variables for all tests
 var (
